@@ -7,9 +7,10 @@ from kivymd.uix.list import OneLineIconListItem
 from kivymd.app import MDApp
 from kivymd.uix.menu import MDDropdownMenu
 from kivymd.uix.pickers import MDDatePicker
-import json
+from pymongo import MongoClient
+from dotenv import load_dotenv
 import os
-import sys
+load_dotenv()
 
 
 KV = '''
@@ -101,38 +102,14 @@ FloatLayout:
 class PatientAssesment(MDApp):
     def __init__(self,patient_id,email, **kwargs):
         super().__init__(**kwargs)
-        if getattr(sys, 'frozen', False):
-            base_path = os.path.dirname(sys.executable)
-        else:
-            base_path = os.path.dirname(__file__)
-        self.patient_json_file_path = os.path.join(base_path,'patient_data.json')
+        mongo_uri = os.getenv('MONGODB_URI')
+        self.client = MongoClient(mongo_uri)
+        self.db = self.client['rehab']
+        self.collection = self.db['patient_data']
         self.screen = Builder.load_string(KV)
         self.patient = patient_id
         self.email = email
         self.data = {}
-
-
-    def save_file(self):
-        try:
-            with open(self.patient_json_file_path, 'r') as file:
-                existing_data = json.load(file)
-        except (FileNotFoundError, json.JSONDecodeError):
-            existing_data = {}
-
-        patient_id = str(self.patient)
-        email = self.email
-
-        if email in existing_data and patient_id in existing_data[email]:
-            date = self.data['Assessment']['Date']
-            if date not in existing_data[email][patient_id]:
-                existing_data[email][patient_id][date] = {}
-            existing_data[email][patient_id][date].update(self.data)
-        print(existing_data)
-
-
-        with open(self.patient_json_file_path,'w') as file :
-            json.dump(existing_data,file, indent=2)
-        file.close() 
 
     def toggle_textfield(self, pain_assessment_type, switch_active):
         textfield = self.root.ids.assessment_textfield
@@ -234,9 +211,21 @@ class PatientAssesment(MDApp):
             self.data = {"Assessment": assessment_data}
             self.data['Pain assesment']= {'VAS value': assessment_text}
 
-            
-            print(self.data)
-            self.save_file()
+            key_email = self.email
+            key_patient = self.patient
+            existing_document = self.collection.find_one({f"{key_email}.{key_patient}": {'$exists': True}})
+            if existing_document :
+                update = {
+                    '$set': {
+                        f"{key_email}.{key_patient}.{date}": self.data,
+                        }
+                }
+                self.collection.update_one(
+                    {f"{key_email}.{key_patient}": {'$exists': True}},
+                    update,
+                    upsert=True
+                )
+
             self.nextpage(date)
 
 

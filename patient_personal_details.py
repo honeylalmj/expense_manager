@@ -1,17 +1,20 @@
 from kivy.lang import Builder
 from kivymd.app import MDApp
-from patient_verification import PatientVerification
 from kivy.metrics import dp
 from kivy.properties import StringProperty
 from kivymd.uix.list import OneLineIconListItem
 from kivymd.uix.menu import MDDropdownMenu
-import random
 from kivymd.uix.dialog import MDDialog
 from kivymd.uix.button import MDRaisedButton
-from send_email import send_email
-import json
+from pymongo import MongoClient
+from dotenv import load_dotenv
+import random
 import os
-import sys
+import base64
+from patient_verification import PatientVerification
+from send_email import send_email
+
+load_dotenv()
 
 KV = '''
 FloatLayout:
@@ -118,43 +121,31 @@ FloatLayout:
         size_hint: 0.1, 0.08
         on_press: app.next()
 '''
+
 class IconListItem(OneLineIconListItem):
     icon = StringProperty()
+
 class PatientPersonalDetails(MDApp):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        if getattr(sys, 'frozen', False):
-            base_path = os.path.dirname(sys.executable)
-        else:
-            base_path = os.path.dirname(__file__)
-        self.patient_json_file_path = os.path.join(base_path,'patient_data.json')
+        mongo_uri = os.getenv('MONGODB_URI')
+        self.client = MongoClient(mongo_uri)
+        self.db = self.client['rehab']
+        self.collection = self.db['patient_data']
         self.screen = Builder.load_string(KV)
-        self.verification_code = random.randint(100000,999999)
-        self.patient_id = random.randint(1000,9999)
+        self.verification_code = random.randint(100000, 999999)
+        self.patient_id = random.randint(1000, 9999)
         self.patient_detail = {}
+
         menu_items = [
-            {
-                "viewclass": "IconListItem",
-                "icon": "git",
-                "text": f"Male",
-                "height": dp(56),
-                "on_release": lambda x="Male": self.set_item(x),
-            },
-            {
-                "viewclass": "IconListItem",
-                "icon": "git",
-                "text": f"Female",
-                "height": dp(56),
-                "on_release": lambda x="Female": self.set_item(x),
-            },
-            {
-                "viewclass": "IconListItem",
-                "icon": "git",
-                "text": f"Others",
-                "height": dp(56),
-                "on_release": lambda x="Others": self.set_item(x),
-            }
+            {"viewclass": "IconListItem", "icon": "git", "text": f"Male",
+             "height": dp(56), "on_release": lambda x="Male": self.set_item(x)},
+            {"viewclass": "IconListItem", "icon": "git", "text": f"Female",
+             "height": dp(56), "on_release": lambda x="Female": self.set_item(x)},
+            {"viewclass": "IconListItem", "icon": "git", "text": f"Others",
+             "height": dp(56), "on_release": lambda x="Others": self.set_item(x)},
         ]
+
         self.menu = MDDropdownMenu(
             caller=self.screen.ids.drop_item,
             items=menu_items,
@@ -162,34 +153,11 @@ class PatientPersonalDetails(MDApp):
             width_mult=4,
         )
 
-    def save_file(self):
-        try:
-            with open(self.patient_json_file_path, 'r') as file:
-                existing_data = json.load(file)
-        except (FileNotFoundError, json.JSONDecodeError):
-            existing_data = {}
-
-        existing_data.update(self.patient_detail)
-
-        with open(self.patient_json_file_path, 'w') as file:
-            json.dump(existing_data, file, indent=2)
-        file.close()
-
-
-    def read_file(self):
-        try:
-            with open(self.patient_json_file_path,'r')as file :
-                data = json.load(file)
-                return data
-        except(FileNotFoundError, json.JSONDecodeError,KeyError):
-            return{}
-        
     def set_item(self, text_item):
         self.screen.ids.drop_item.text = text_item
-        self.menu.dismiss()   
+        self.menu.dismiss()
 
     def build(self):
-      
         self.screen.ids.text_field_patientname.bind(
             on_text_validate=self.set_error_message,
             on_focus=self.set_error_message,
@@ -202,7 +170,8 @@ class PatientPersonalDetails(MDApp):
             on_text=self.set_error_message,
         )
         self.screen.ids.text_field_age.bind(
-            on_text=self.set_error_message,
+            on_text_validate=self.set_error_message,
+            on_focus=self.set_error_message,
         )
         self.screen.ids.text_field_housename.bind(
             on_text_validate=self.set_error_message,
@@ -239,20 +208,21 @@ class PatientPersonalDetails(MDApp):
             instance_textfield.error = False
             instance_textfield.helper_text = ""
 
-    def show_verification_Dialog(self,email):
+    def show_verification_dialog(self, email):
         dialog = MDDialog(
-            text="Verification code with Patient ID sent successfully !",
+            text="Verification code with Patient ID sent successfully!",
             buttons=[
                 MDRaisedButton(
                     text="OK",
-                    on_release=lambda x: self.handle_verification_success_dialog_dismiss(dialog,email)
+                    on_release=lambda x: self.handle_verification_success_dialog_dismiss(dialog, email)
                 )
             ]
         )
         dialog.open()
-    def showlogin_not_exists_data_dialog(self):
+
+    def show_existing_data_dialog(self):
         dialog = MDDialog(
-            text="Patient already exists with the data provided !",
+            text="Patient already exists with the provided email!",
             buttons=[
                 MDRaisedButton(
                     text="OK",
@@ -262,15 +232,16 @@ class PatientPersonalDetails(MDApp):
         )
         dialog.open()
 
-    def handle_verification_success_dialog_dismiss(self,dialog,email):
+    def handle_verification_success_dialog_dismiss(self, dialog, email):
         dialog.dismiss()
-        self.stop() 
-        PatientVerification(self.verification_code,self.patient_id,email).run()
+        self.stop()
+        # Start verification process with PatientVerification instance
+        PatientVerification(self.verification_code, self.patient_id, email).run()
+
     def next(self):
-    
         patient_name = self.screen.ids.text_field_patientname.text.strip()
         patient_last_name = self.screen.ids.text_field_patientlastname.text.strip()
-        age = self.screen.ids.text_field_age.text
+        age = self.screen.ids.text_field_age.text.strip()
         sex = self.screen.ids.drop_item.text
         house_name = self.screen.ids.text_field_housename.text.strip()
         street_name = self.screen.ids.text_field_streetname.text.strip()
@@ -297,13 +268,14 @@ class PatientPersonalDetails(MDApp):
         if not patient_last_name:
             self.screen.ids.text_field_patientlastname.error = True
             self.screen.ids.text_field_patientlastname.helper_text = "Required field"
+
         if not age:
             self.screen.ids.text_field_age.error = True
             self.screen.ids.text_field_age.helper_text = "Required field"
 
-        if not sex:
+        if not sex or sex == "select":
             self.screen.ids.drop_item.error = True
-            self.screen.ids.drop_item.helper_text = "Required field"   
+            self.screen.ids.drop_item.helper_text = "Required field"
 
         if not house_name:
             self.screen.ids.text_field_housename.error = True
@@ -327,44 +299,49 @@ class PatientPersonalDetails(MDApp):
 
         if not patient_mobile_number:
             self.screen.ids.text_field_patientmobilenumber.error = True
-            self.screen.ids.text_field_patientmobilenumber.helper_text = "Required field"            
+            self.screen.ids.text_field_patientmobilenumber.helper_text = "Required field"
 
-        existing_data = self.read_file()
-        if (age
-            and (sex != "select")
-            and patient_name 
-            and patient_last_name 
-            and house_name 
-            and street_name 
-            and city and 
-            postal_code 
-            and patient_email 
-            and patient_mobile_number) :
-            patient_data = {'Personal details ' :{"Patient Name": patient_name,
-                            "Patient Last Name": patient_last_name,
-                            "Age": age,
-                            "Sex": sex,
-                            "House Name": house_name,
-                            "Street Name": street_name,
-                            "City": city,
-                            "Postal Code": postal_code,
-                            "Patient Email": patient_email,
-                            "Patient Mobile Number": patient_mobile_number}}
-            if patient_email not in existing_data:
-                send_email(patient_name, self.verification_code, self.patient_id, patient_email)
-                # Proceed only if patient_email is not in existing_data
-                self.patient_detail[patient_email] = {self.patient_id: patient_data}
-                print(self.patient_detail)
-                self.save_file()
-                self.show_verification_Dialog(patient_email)
+        if (patient_name and patient_last_name and age and sex != "select" and house_name and street_name
+                and city and postal_code and patient_email and patient_mobile_number):
+            patient_data = {
+                "Patient Name": patient_name,
+                "Patient Last Name": patient_last_name,
+                "Age": age,
+                "Sex": sex,
+                "House Name": house_name,
+                "Street Name": street_name,
+                "City": city,
+                "Postal Code": postal_code,
+                "Patient Email": patient_email,
+                "Patient Mobile Number": patient_mobile_number
+            }
+
+            # Encode patient_email for MongoDB storage
+            encoded_patient_email = base64.b64encode(patient_email.encode()).decode()
+
+            # Check if patient_email already exists in MongoDB
+            existing_data = self.collection.find_one(
+                {encoded_patient_email: {'$exists': True}}
+            )
+            print(existing_data)
+            if existing_data:
+                self.show_existing_data_dialog()
             else:
-                # If patient_email is found in existing_data, it means the patient already exists
-                self.showlogin_not_exists_data_dialog()
+                send_email(patient_name, self.verification_code, self.patient_id, patient_email)
+                nested_data = {
+                    str(self.patient_id): {
+                        "Personal details": patient_data
+                    }
+                }
+                result = self.collection.update_one(
+                    {encoded_patient_email: {'$exists': False}},
+                    {'$set': {encoded_patient_email: nested_data}},
+                    upsert=True
+                )
 
+                if result.matched_count or result.upserted_id:
+                    self.show_verification_dialog(encoded_patient_email)
 
-            
-
-           
 
 if __name__ == "__main__":
     PatientPersonalDetails().run()

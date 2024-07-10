@@ -1,8 +1,6 @@
 import smtplib
 from email.mime.text import MIMEText
 
-
-
 def send_email(name,code,patient_id,email):
     
     subject = "Verification code for {}".format(name)

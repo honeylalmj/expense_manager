@@ -1,9 +1,10 @@
 from kivy.lang import Builder
 from kivymd.app import MDApp
 from patient_muscletone_lower import PatientMuscletoneLower
-import json
+from pymongo import MongoClient
 import os
-import sys
+from dotenv import load_dotenv
+load_dotenv()
 KV = '''
 FloatLayout:
     canvas.before:
@@ -126,15 +127,13 @@ FloatLayout:
 class PatientMuscletoneUpper(MDApp):
     def __init__(self,patient_no,date,email, **kwargs):
         super().__init__(**kwargs)
-        if getattr(sys, 'frozen', False):
-            base_path = os.path.dirname(sys.executable)
-        else:
-            base_path = os.path.dirname(__file__)
-        self.patient_json_file_path = os.path.join(base_path,'patient_data.json')
+        mongo_uri = os.getenv('MONGODB_URI')
+        self.client = MongoClient(mongo_uri)
+        self.db = self.client['rehab']
+        self.collection = self.db['patient_data']
         self.patient = patient_no
         self.date = date
         self.email = email
-        self.data = {}
 
     limb_textfield_ids = {
         "shoulder": ("shoulder_left_textfield", "shoulder_right_textfield"),
@@ -147,20 +146,6 @@ class PatientMuscletoneUpper(MDApp):
     def build(self):
         return Builder.load_string(KV)
     
-    def save_file(self):
-        try:
-            with open(self.patient_json_file_path,'r')as file:
-                existing_data = json.load(file)
-        except (FileNotFoundError, json.JSONDecodeError):
-            existing_data = {}
-        patient_id = str(self.patient)
-        email = self.email
-
-        if email in existing_data and patient_id in existing_data[email]:
-            existing_data[email][patient_id][self.date].update(self.data)  
-        with open(self.patient_json_file_path,'w') as file :
-            json.dump(existing_data,file, indent=2)
-        file.close()  
 
     def set_error_message(self, instance_textfield, value):
         if not instance_textfield.text.strip():
@@ -207,10 +192,22 @@ class PatientMuscletoneUpper(MDApp):
                 muscle_tone_upper_asess = {"Left": left_range,
                                             "Right": right_range}
                 muscletone_upper[limb]=muscle_tone_upper_asess
-                
-            self.data['Muscle tone test for Upper limb'] = muscletone_upper
-            self.save_file()
-            print(self.data)
+
+            key_email = self.email
+            key_patient = self.patient
+            key_date = self.date
+            existing_document = self.collection.find_one({f"{key_email}.{key_patient}.{key_date}": {'$exists': True}})
+            if existing_document :
+                update = {
+                    '$set': {
+                        f"{key_email}.{key_patient}.{key_date}.Muscle tone test for Upper limb": muscletone_upper,
+                        }
+                }
+                self.collection.update_one(
+                    {f"{key_email}.{key_patient}.{key_date}": {'$exists': True}},
+                    update,
+                    upsert=True
+                ) 
             self.stop() 
             PatientMuscletoneLower(self.patient,self.date,self.email).run()       
             

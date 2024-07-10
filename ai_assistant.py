@@ -5,11 +5,10 @@ from kivymd.uix.button import MDIconButton, MDFlatButton
 from kivymd.uix.textfield import MDTextField
 from kivymd.uix.label import MDLabel
 from kivymd.uix.scrollview import MDScrollView
-from openai import OpenAI
+import requests
+import json
 
-# Set up OpenAI client
-client = OpenAI(base_url="http://localhost:1234/v1", api_key="not-needed")
-
+# KV String defining the layout
 KV = '''
 BoxLayout:
     orientation: 'vertical'
@@ -52,9 +51,13 @@ BoxLayout:
 '''
 
 class ChatApp(MDApp):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.screen = Builder.load_string(KV)
+
     def build(self):
-        return Builder.load_string(KV)
-    
+        return self.screen
+
     def send_message(self):
         user_input = self.root.ids.user_input.text.strip()
         if user_input:
@@ -74,22 +77,59 @@ class ChatApp(MDApp):
         else:
             message = "[color=0000FF]AI:[/color] " + message
         chat_history_label.text += "\n" + message
-    
+
     def get_ai_response(self, user_input):
-        # Initialize AI assistant instance
-        assistant = client.chat.completions.create(
-            model="local-model", 
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant for physiotherapy."},
-                {"role": "user", "content": user_input}
-            ]
-        )
+        if self.is_greeting(user_input):
+            return "Hello! How can I assist you with your physiotherapy questions today?"
         
-        # Access the message content from the completion object
-        reply = assistant.choices[0].message.content
+        try:
+            # Define the URL for the API endpoint
+            url = "http://localhost:11434/api/chat"
+            
+            # Define the initial prompt
+            initial_prompt = "You are an AI specialized in physiotherapy. Only answer questions related to physiotherapy. If a question is not related to physiotherapy, politely refuse to answer."
+
+            # Define the payload with initial instruction and user input
+            payload = {
+                "model": "gemma:2b",
+                "messages": [
+                    {"role": "system", "content": initial_prompt},
+                    {"role": "user", "content": user_input}
+                ]
+            }
+            
+            # Send a POST request to the API
+            response = requests.post(url, json=payload)
+
+            # Split the response into individual JSON objects
+            response_lines = response.content.strip().split(b'\n')
+
+            # Initialize the AI response
+            ai_response = ""
+
+            # Iterate over each JSON object and parse it
+            for line in response_lines:
+                try:
+                    json_obj = json.loads(line)
+                    ai_response += json_obj["message"]["content"] + " "
+                except Exception as e:
+                    print("Error parsing JSON response:", e)
+
+            # If no valid JSON object was found
+            if not ai_response:
+                print("Error: No valid JSON response found")
+                return "Error: No valid JSON response found"
+            
+            return ai_response.strip()
         
-        return reply
+        except Exception as e:
+            print("Error:", e)
+            return "Error: Exception occurred while getting AI response"
     
+    def is_greeting(self, user_input):
+        greetings = ["hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening"]
+        return any(greeting in user_input.lower() for greeting in greetings)
+
     def go_back(self):
         self.stop()
         from home_page import HomePage

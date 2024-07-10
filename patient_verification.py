@@ -92,9 +92,5 @@ class PatientVerification(MDApp):
             else :
                 self.showverification_not_exists_dialog()
                     
-        
-    
-   
-
 if __name__ == "__main__":
     PatientVerification().run()

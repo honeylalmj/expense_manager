@@ -44,9 +44,6 @@ FloatLayout:
         on_release: app.go_back() 
 
 '''
-
-
-
 class AddPatient(MDApp):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

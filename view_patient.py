@@ -1,12 +1,13 @@
 from kivymd.app import MDApp
 from kivy.lang import Builder
 from kivymd.uix.button import MDRaisedButton
-import json
 from kivymd.uix.dialog import MDDialog
 from kivymd.uix.button import MDFlatButton
 from kivymd.uix.pickers import MDDatePicker
 import os
-import sys
+from pymongo import MongoClient
+from dotenv import load_dotenv
+load_dotenv()
 
 KV = '''
 FloatLayout:
@@ -52,12 +53,10 @@ class ViewPatientScreen(MDApp):
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        if getattr(sys, 'frozen', False):
-            base_path = os.path.dirname(sys.executable)
-        else:
-            base_path = os.path.dirname(__file__)
-        
-        self.patient_json_file_path = os.path.join(base_path,'patient_data.json')
+        mongo_uri = os.getenv('MONGODB_URI')
+        self.client = MongoClient(mongo_uri)
+        self.db = self.client['rehab']
+        self.collection = self.db['patient_data']
         self.screen = Builder.load_string(KV)
         
     def build(self):
@@ -83,15 +82,6 @@ class ViewPatientScreen(MDApp):
     def on_cancel(self, instance, value):
         pass    
     
-    def read_file(self):
-        try:
-            with open(self.patient_json_file_path, 'r') as file:
-                patient_data = json.load(file)
-                return patient_data
-        except (FileNotFoundError, KeyError, json.JSONDecodeError):
-            print("Data not found")
-            return {}      
-  
     def set_error_message(self, instance_textfield):
 
         if not instance_textfield.text.strip():
@@ -102,24 +92,24 @@ class ViewPatientScreen(MDApp):
             instance_textfield.helper_text = ""
          
 
-    def showlogin_exists__dialog(self, patient_id_no, consult_date, email_id):
+    def showlogin_exists__dialog(self,patient_id_no,consult_date,email_id):
         dialog = MDDialog(
             text="Patient ID and Consultation date exists !",
             buttons=[
                 MDRaisedButton(
                     text="OK",
-                    on_release=lambda x: self.handle_login_success_dialog_dismiss(dialog, patient_id_no, consult_date, email_id)
+                    on_release=lambda x: self.handle_login_success_dialog_dismiss(dialog,patient_id_no,consult_date,email_id)
                 )
             ]
         )
         dialog.open()
        
 
-    def handle_login_success_dialog_dismiss(self, dialog, patient_id_no, consult_date, email):
+    def handle_login_success_dialog_dismiss(self,dialog,patient_id_no,consult_date,email):
         dialog.dismiss()
         MDApp.get_running_app().root.clear_widgets()
         from view_data import DisplayPatientDataApp
-        DisplayPatientDataApp(patient_id_no, consult_date, email).run()
+        DisplayPatientDataApp(patient_id_no,consult_date,email).run()
         
     def showlogin_not_exists_dialog(self):
         dialog = MDDialog(
@@ -155,7 +145,6 @@ class ViewPatientScreen(MDApp):
         HomePage().run()
 
     def login(self):
-        patient_info = self.read_file()
         patient_id_no = self.screen.ids.patient_id.text
         consult_date = self.screen.ids.date_button.text
 
@@ -170,16 +159,24 @@ class ViewPatientScreen(MDApp):
             self.screen.ids.date_button.error = True
             self.screen.ids.date_button.helper_text = "Required field"
 
-        if (patient_id_no and (consult_date != "Select Date")) :
-            email_ids = patient_info.keys()
-            for email_id in email_ids:
-                patient_data = patient_info[email_id]
-                if patient_id_no in patient_data:
-                    if consult_date in patient_data[patient_id_no]:
-                        self.showlogin_exists__dialog(patient_id_no, consult_date,email_id)
-                        return
+        patient_exists = False
+
+        for document in self.collection.find():
+            for email, value in document.items():
+                if isinstance(value, dict):
+                    for patient_id, data in value.items():
+                            if patient_id == patient_id_no and consult_date in data:
+                                patient_exists = True
+                                self.showlogin_exists__dialog(patient_id_no,consult_date,email)
+                                break
+                    if patient_exists == True :
+                        break
+                if patient_exists == True :
+                        break
+        if not patient_exists :         
             self.showlogin_not_exists_dialog()
-        else:
+        elif not document:
             self.showlogin_not_exists_data_dialog()
+
 if __name__ == '__main__':
     ViewPatientScreen().run()
