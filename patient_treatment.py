@@ -6,9 +6,10 @@ from kivymd.uix.list import OneLineIconListItem
 from kivymd.uix.dialog import MDDialog
 from kivymd.uix.button import MDRaisedButton
 from kivy.properties import StringProperty
-import json
+from pymongo import MongoClient
 import os
-import sys
+from dotenv import load_dotenv
+load_dotenv()
 
 KV = '''
 FloatLayout:
@@ -82,16 +83,14 @@ class IconListItem(OneLineIconListItem):
 class PatientTreatment(MDApp):
     def __init__(self,patient_no,date,email, **kwargs):
         super().__init__(**kwargs)
-        if getattr(sys, 'frozen', False):
-            base_path = os.path.dirname(sys.executable)
-        else:
-            base_path = os.path.dirname(__file__)
-        self.patient_json_file_path = os.path.join(base_path,'patient_data.json')
+        mongo_uri = os.getenv('MONGODB_URI')
+        self.client = MongoClient(mongo_uri)
+        self.db = self.client['rehab']
+        self.collection = self.db['patient_data']
         self.screen = Builder.load_string(KV)
         self.patient = patient_no
         self.date = date
         self.email = email
-        self.data = {}
 
         menu_items = [
             {
@@ -136,20 +135,6 @@ class PatientTreatment(MDApp):
         )
         return self.screen
     
-    def save_file(self):
-        try:
-            with open(self.patient_json_file_path,'r')as file:
-                existing_data = json.load(file)
-        except (FileNotFoundError, json.JSONDecodeError):
-            existing_data = {}
-        patient_id = str(self.patient)
-        email = self.email
-
-        if email in existing_data and patient_id in existing_data[email]:
-            existing_data[email][patient_id][self.date].update(self.data)  
-        with open(self.patient_json_file_path,'w') as file :
-            json.dump(existing_data,file, indent=2)
-        file.close()  
 
     def set_error_message(self, instance_textfield, value):
         if not instance_textfield.text.strip() or (instance_textfield == self.screen.ids.drop_item and value == "select"):
@@ -217,11 +202,26 @@ class PatientTreatment(MDApp):
             treatment_plan = {"Short term goal": short_term_plan,
                             "Long term goal": long_term_plan}
             
-            self.data['Treatment plan'] = treatment_plan
-            self.data['Treatment'] = {'Treatment':treatment}
-            self.data['Prognosis'] = {'Prognosis' :prognosis}
-            self.save_file()
-            print(self.data)
+            treat = {'Treatment':treatment}
+            pro = {'Prognosis' :prognosis}
+            key_email = self.email
+            key_patient = self.patient
+            key_date = self.date
+            existing_document = self.collection.find_one({f"{key_email}.{key_patient}.{key_date}": {'$exists': True}})
+            if existing_document :
+                update = {
+                    '$set': {
+                        f"{key_email}.{key_patient}.{key_date}.Treatment plan": treatment_plan,
+                        f"{key_email}.{key_patient}.{key_date}.Treatment": treat,
+                        f"{key_email}.{key_patient}.{key_date}.Prognosis": pro,
+
+                        }
+                }
+                self.collection.update_one(
+                    {f"{key_email}.{key_patient}.{key_date}": {'$exists': True}},
+                    update,
+                    upsert=True
+                )
             self.show_verification_Dialog()
 
 

@@ -7,7 +7,9 @@ from kivymd.uix.button import MDFlatButton
 import json
 from kivymd.uix.dialog import MDDialog
 import os
-import sys
+from pymongo import MongoClient
+from dotenv import load_dotenv
+load_dotenv()
 
 KV = '''
 FloatLayout:
@@ -41,11 +43,10 @@ FloatLayout:
 class ExistingPatient(MDApp):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        if getattr(sys, 'frozen', False):
-            base_path = os.path.dirname(sys.executable)
-        else:
-            base_path = os.path.dirname(__file__)
-        self.patient_json_file_path = os.path.join(base_path,'patient_data.json')
+        mongo_uri = os.getenv('MONGODB_URI')
+        self.client = MongoClient(mongo_uri)
+        self.db = self.client['rehab']
+        self.collection = self.db['patient_data']
         self.screen = Builder.load_string(KV)
         
     def build(self):
@@ -56,15 +57,6 @@ class ExistingPatient(MDApp):
         )
         return self.screen
     
-    def read_file(self):
-        try:
-            with open(self.patient_json_file_path,'r') as file :
-                patient_data = json.load(file)
-                return patient_data
-        except (FileNotFoundError, KeyError,json.JSONDecodeError):
-            print("Data not found")
-            return {}      
-  
     def set_error_message(self, instance_textfield):
 
         if not instance_textfield.text.strip():
@@ -128,7 +120,6 @@ class ExistingPatient(MDApp):
         HomePage().run()
 
     def login(self):
-        patient_existing_data = self.read_file()
         patient_id_no = self.screen.ids.patient_id.text.strip()
 
         self.screen.ids.patient_id.error = False
@@ -136,15 +127,29 @@ class ExistingPatient(MDApp):
         if not patient_id_no:
             self.screen.ids.patient_id.error = True
             self.screen.ids.patient_id.helper_text = "Required field"
-            
-        if patient_existing_data :
-            for email_id, patient_data in patient_existing_data.items():
-                if patient_id_no in patient_data :
-                    self.showlogin_exists__dialog(patient_id_no,email_id)
-                    return
-            self.showlogin_not_exists_dialog()  
-        else:
-            self.showlogin_not_exists_data_dialog()       
+
+
+         # Iterate through all documents in the collection to find the patient ID
+        patient_exists = False
+
+        for document in self.collection.find():
+            for email_key, patient_data in document.items():
+                if isinstance(patient_data, dict):
+                    for id_key, details in patient_data.items():
+                        if id_key == patient_id_no:
+                            patient_exists = True
+                            break
+                    if patient_exists:
+                        break
+            if patient_exists:
+                break
+
+        if patient_exists:
+            self.showlogin_exists__dialog(patient_id_no,email_key)
+        elif not patient_exists:
+            self.showlogin_not_exists_dialog()
+        elif not document:
+            self.showlogin_not_exists_data_dialog()      
   
 if __name__ == "__main__":
     ExistingPatient().run()

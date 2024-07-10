@@ -5,6 +5,7 @@ from kivymd.uix.dialog import MDDialog
 from kivymd.uix.button import MDRaisedButton
 from dotenv import load_dotenv
 from pymongo import MongoClient
+from bson import ObjectId
 load_dotenv()
 
 KV = '''
@@ -70,58 +71,43 @@ FloatLayout:
         pos_hint: {"center_x": 0.4, "center_y": 0.2}
         size_hint: 0.1, 0.08
         on_press: app.back()    
-   '''
+'''
 
 class AccountCreation(MDApp):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.json_file_path = os.path.join(base_path,'data.json')
-        self.database_file_path = os.path.join(base_path,'database.json')
         self.screen = Builder.load_string(KV)
-        self.data = {"111":{}}
+        mongo_uri = os.getenv("MONGODB_URI")
+        self.client = MongoClient(mongo_uri)
+        self.db = self.client['rehab']
+        self.collection = self.db['license']
+        self.collection2 = self.db['user_data']
+        self.initial_data = {
+            "222": {
+                "123": {
+                    "first_name": "Jeeshma",
+                    "last_name": "MJ"
+                },
+                "124": {
+                    "first_name": "Honeylal",
+                    "last_name": "MJ"
+                },
+                "125": {
+                    "first_name": "Jayas",
+                    "last_name": "Jacob"
+                }
+            }
+        }
+        self.check_and_insert_initial_data()
 
-    def save_file(self):
-        try:
-            with open(self.json_file_path, "r") as file:
-                existing_data = json.load(file)
-            print("JSON data loaded successfully.")
-        except (FileNotFoundError, json.JSONDecodeError):
-            existing_data = {}
-        print("Error loading JSON file")    
+    def check_and_insert_initial_data(self):
+        if not self.collection.find_one({"222": {"$exists": True}}):
+            self.collection.insert_one({
+                "222": self.initial_data["222"],
+                "_id": ObjectId()
+            })
 
-        license_number_main_key = "111" 
-
-        
-        existing_data.setdefault(license_number_main_key, {}).update(self.data.get(license_number_main_key, {}))
-
-        
-        with open(self.json_file_path, "w") as file:
-            json.dump(existing_data, file, indent=2)
-
-
-    def read_data_file(self):
-        try:
-            with open(self.json_file_path,'r')as file:
-                exist_data = json.load(file)
-                old_data = exist_data['111']
-                print("JSON data loaded successfully.")
-                return old_data
-            
-        except(FileNotFoundError, json.JSONDecodeError,KeyError):
-            print("license number not found in data")
-            return{}
-            
-    def read_file(self) :
-        try:
-            with open(self.database_file_path,"r") as file :
-                user_data = json.load(file)
-                print("JSON data loaded successfully.")
-                data = user_data["222"]
-                return data
-        except(FileNotFoundError,json.JSONDecodeError, KeyError):
-            print("license number not found in database")
-            return {}
-    def back (self):
+    def back(self):
         self.stop()
         from login_page import LoginPage
         LoginPage().run()
@@ -146,7 +132,7 @@ class AccountCreation(MDApp):
 
     def show_license_not_exists_dialog(self):
         dialog = MDDialog(
-            text="ID number not recognized !",
+            text="ID number not recognized!",
             buttons=[
                 MDRaisedButton(
                     text="OK",
@@ -155,9 +141,10 @@ class AccountCreation(MDApp):
             ]
         )
         dialog.open()
+
     def license_exists_dialog(self):
         dialog = MDDialog(
-            text="Already registered !",
+            text="Already registered!",
             buttons=[
                 MDRaisedButton(
                     text="OK",
@@ -168,7 +155,6 @@ class AccountCreation(MDApp):
         dialog.open()    
 
     def build(self):
-
         self.screen.ids.text_field_firstname.bind(
             on_text_validate=self.set_error_message,
             on_focus=self.set_error_message,
@@ -189,11 +175,9 @@ class AccountCreation(MDApp):
             on_text_validate=self.set_error_message,
             on_focus=self.set_error_message,
         )
-
         return self.screen
 
     def set_error_message(self, instance_textfield):
-
         if not instance_textfield.text.strip():
             instance_textfield.error = True
             instance_textfield.helper_text = "Required field"
@@ -207,15 +191,14 @@ class AccountCreation(MDApp):
         license_number = self.screen.ids.text_field_licensenumber.text.strip()
         password = self.screen.ids.text_field_password.text.strip()
         email = self.screen.ids.text_field_email.text.strip()
-        user_database = self.read_file()
 
         user_data = {
-            "first_name" : first_name,
-            "last_name"  : last_name,
-            "password"   : password,
-            "email"      : email
-            }
-        
+            "first_name": first_name,
+            "last_name": last_name,
+            "password": password,
+            "email": email
+        }
+
         self.screen.ids.text_field_firstname.error = False
         self.screen.ids.text_field_lastname.error = False
         self.screen.ids.text_field_licensenumber.error = False
@@ -241,20 +224,21 @@ class AccountCreation(MDApp):
         if not email:
             self.screen.ids.text_field_email.error = True
             self.screen.ids.text_field_email.helper_text = "Required field"
-        old_data = self.read_data_file()
+
         if first_name and last_name and license_number and password and email:
-            if license_number in user_database and first_name == user_database[license_number]["first_name"] :
-                    
-                    if license_number not in old_data:
-                        self.data["111"][license_number] = user_data
-                        self.save_file()
-                        self.show_license_exists_dialog()
-                    else:
-                        self.license_exists_dialog()
+            # Check if license number and first name exist in license collection
+            license_record = self.collection.find_one({"222.{}".format(license_number): {"$exists": True}})
+            if license_record and license_record["222"][license_number]["first_name"] == first_name:
+                # Check if user data already exists in user_data collection
+                user_data_exists = self.collection2.find_one({license_number: {"$exists": True}})
+                if not user_data_exists:
+                    # Insert new user data into user_data collection under the license number
+                    self.collection2.insert_one({license_number: user_data})
+                    self.show_license_exists_dialog()
+                else:
+                    self.license_exists_dialog()
             else:
                 self.show_license_not_exists_dialog()
-
-
 
 if __name__ == "__main__":
     AccountCreation().run()

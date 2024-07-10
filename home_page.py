@@ -45,12 +45,12 @@ FloatLayout:
         pos_hint: {"center_x": 0.61, "center_y": 0.3}
         size_hint:0.3,0.1 
         on_release: app.send_email()          
-    # MDTextButton:
-    #     text: "AI Support"
-    #     custom_color: "black"  
-    #     pos_hint: {"center_x": 0.625, "center_y": 0.25}
-    #     size_hint:0.3,0.1
-    #     on_press: app.ai_api()          
+    MDTextButton:
+        text: "AI Support"
+        custom_color: "black"  
+        pos_hint: {"center_x": 0.625, "center_y": 0.25}
+        size_hint:0.3,0.1
+        on_press: app.ai_api()          
 
         '''
 
@@ -76,8 +76,12 @@ class HomePage(MDApp):
     def send_email(self):
         default_email_address = "trackerrehab@gmail.com"
         webbrowser.open(f"mailto:{default_email_address}?subject=Support%20Required&body=Email%20body%20text")
+    
+    def ai_api(self):
+        self.stop()
+        from ai_assistant import ChatApp
+        ChatApp().run()
 
-     
 
 if __name__ == "__main__":
     HomePage().run()

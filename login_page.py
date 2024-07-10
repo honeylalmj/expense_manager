@@ -63,6 +63,7 @@ class LoginPage(MDApp):
         mongo_uri = os.getenv("MONGODB_URI")
         self.client = MongoClient(mongo_uri)
         self.db = self.client['rehab']
+        self.collection = self.db['user_data']
         self.screen = Builder.load_string(KV)
         self.login_id = login_id
 
@@ -73,15 +74,6 @@ class LoginPage(MDApp):
     def build(self):
         return self.screen
 
-    def read_data(self):
-        try:
-            with open(self.json_file_path, "r") as file:
-                user_data = json.load(file)
-                data = user_data["111"]
-            return data
-        except (FileNotFoundError, KeyError,json.JSONDecodeError):
-            print("username not found")
-            return {}
 
     def showlogin_exists__dialog(self):
         dialog = MDDialog(
@@ -130,12 +122,14 @@ class LoginPage(MDApp):
     def login(self):
         username = self.screen.ids.text_field_error.text.strip()
         password = self.screen.ids.text_field_error1.text.strip()
-        user_data = self.read_data()
-        if user_data:
-            if username in user_data and password == user_data[username]["password"]:
-                    self.showlogin_exists__dialog()
+
+        user_data = self.collection.find_one({username: {'$exists': True}})
+    
+        if user_data :
+            if user_data[username]["password"] == password :
+                self.showlogin_exists__dialog()
             else:
-                    self.showlogin_not_exists_dialog()
+                self.showlogin_not_exists_dialog()
         else:
             self.showlogin_not_exists_data_dialog()
 

@@ -6,9 +6,10 @@ from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.dialog import MDDialog
 from kivymd.uix.button import MDFlatButton
 from view_patient import ViewPatientScreen
-import json
 import os
-import sys
+from pymongo import MongoClient
+from dotenv import load_dotenv
+load_dotenv()
 KV = '''
 BoxLayout:
     orientation: 'vertical'
@@ -31,24 +32,14 @@ BoxLayout:
 class DisplayPatientDataApp(MDApp):
     def __init__(self, patient_id, consultation_date,email, **kwargs):
         super().__init__(**kwargs)
-        if getattr(sys, 'frozen', False):
-            base_path = os.path.dirname(sys.executable)
-        else:
-            base_path = os.path.dirname(__file__)
-        self.patient_json_file_path = os.path.join(base_path,'patient_data.json')
+        mongo_uri = os.getenv('MONGODB_URI')
+        self.client = MongoClient(mongo_uri)
+        self.db = self.client['rehab']
+        self.collection = self.db['patient_data']
         self.patient_id = patient_id
         self.consultation_date = consultation_date
         self.email = email
-        self.data = self.read_file()
 
-    def read_file(self):
-        try:
-            with open(self.patient_json_file_path, 'r') as file:
-                patient_data = json.load(file)
-                return patient_data
-        except (FileNotFoundError, KeyError, json.JSONDecodeError):
-            print("Data not found")
-            return {}
 
     def build(self):
         self.root = Builder.load_string(KV)
@@ -64,13 +55,15 @@ class DisplayPatientDataApp(MDApp):
     def display_data(self):
         self.root.ids.container.clear_widgets()
 
-        if self.patient_id is not None and self.consultation_date is not None and self.email is not None:
-            patient_details = self.data.get(self.email, {}).get(self.patient_id, {}).get("Personal details ", {})
-            consultation_details = self.data.get(self.email, {}).get(self.patient_id, {}).get(self.consultation_date, {})
+        document = self.collection.find_one({self.email: {"$exists": True}})
+        if document and self.patient_id in document[self.email] and self.consultation_date in document[self.email][self.patient_id]:
+            patient_details = document[self.email][self.patient_id].get("Personal details", {})
+            consultation_details = document[self.email][self.patient_id][self.consultation_date]
+
             assesment_details  = consultation_details.get("Assessment", {})
             pain_assesment = consultation_details.get("Pain assesment", {})
             upper_limb_motion = consultation_details.get("Range of motion for Upper limb", {})
-            lower_limb_motion = consultation_details.get("Range of motion of Lower limb", {})
+            lower_limb_motion = consultation_details.get("Range of motion for Lower limb", {})
             muscle_test_upper_limb = consultation_details.get("Manual Muscle test for Upper limb", {})
             muscle_test_lower_limb = consultation_details.get("Manual Muscle test for Lower limb", {})
             muscle_tone_test_upper_limb = consultation_details.get("Muscle tone test for Upper limb", {})
